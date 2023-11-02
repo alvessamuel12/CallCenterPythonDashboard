@@ -7,6 +7,9 @@ import pandas as pd
 from dash_bootstrap_templates import ThemeSwitchAIO
 import dash
 
+month_list = ['Ano Todo', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+PAID_VALUE = 'Valor Pago'
+PAYMENT_STATUS = 'Status de Pagamento'
 FONT_AWESOME = ["https://use.fontawesome.com/releases/v5.10.2/css/all.css"]
 app = dash.Dash(__name__, external_stylesheets=FONT_AWESOME)
 app.scripts.config.serve_locally = True
@@ -32,16 +35,17 @@ main_config = {
 
 config_graph = {'displayModeBar': False, 'showTips': False}
 
-template_theme_white = 'flatly'
+template_theme_light = 'flatly'
 template_theme_dark = 'darkly'
 
-url_theme_white = dbc.themes.FLATLY
+url_theme_light = dbc.themes.FLATLY
 url_theme_dark = dbc.themes.DARKLY
 
 # reading and cleaning database
 
 df = pd.read_csv('./data/dataset_asimov.csv')
 df_aux = df.copy() # df_cru
+
 # formatting months texts into numbers
 
 df.loc[df['Mês'] == 'Jan', 'Mês'] = 1
@@ -57,35 +61,52 @@ df.loc[ df['Mês'] == 'Out', 'Mês'] = 10
 df.loc[ df['Mês'] == 'Nov', 'Mês'] = 11
 df.loc[ df['Mês'] == 'Dez', 'Mês'] = 12
 
+
 # cleaning database
 
-PAID_VALUE = 'Valor Pago'
-PAYMENT_STATUS = 'Status de Pagamento'
 df[PAID_VALUE] = df[PAID_VALUE].str.lstrip('R$ ')
 df.loc[df[PAYMENT_STATUS] == 'Pago', PAYMENT_STATUS] = 1
 df.loc[df[PAYMENT_STATUS] == 'Não pago', PAYMENT_STATUS] = 0
 
+
 # fixing types into numbers
+
 df['Chamadas Realizadas'] = df['Chamadas Realizadas'].astype(int)
 df['Dia'] = df['Dia'].astype(int)
 df['Mês'] = df['Mês'].astype(int)
 df[PAID_VALUE] = df[PAID_VALUE].astype(int)
 df[PAYMENT_STATUS] = df[PAYMENT_STATUS].astype(int)
 
+
 # Build filter options:
 
-# filter of months
+# options of months
 options_month = [{'label': 'Ano Todo', 'value': 0}]
 for i, j in zip(df_aux['Mês'].unique(), df['Mês'].unique()):
     options_month.append({'label': i, 'value': j})
 
 options_month = sorted(options_month, key=lambda x: x['value'])
 
-# filter of teams
+# options of teams
 options_team = [{'label': 'Todas as Equipes', 'value': 0}]
 for i in df['Equipe'].unique():
     options_team.append({'label': i, 'value': i})
 
+
+# ===== filters ===== #
+
+def month_filter(month):
+    if month == 0:
+        return df['Mês'].isin(df['Mês'].unique())
+    return df['Mês'].isin([month])
+
+def team_filter(team):
+    if team == 0:
+        return df['Equipe'].isin(df['Equipe'].unique())
+    return df['Equipe'].isin([team])
+ 
+def convert_to_text(month):
+    return month_list[month]
 
 # ===== layout ===== #
 app.layout = dbc.Container(
@@ -106,7 +127,7 @@ app.layout = dbc.Container(
                         ]),
                         dbc.Row([
                             dbc.Col([
-                                ThemeSwitchAIO(aio_id="theme", themes=[url_theme_white, url_theme_dark]),
+                                ThemeSwitchAIO(aio_id="theme", themes=[url_theme_light, url_theme_dark]),
                                 html.Legend("Asimov Academy")
                             ])
                         ], style={'margin-top': '10px'}),
@@ -257,7 +278,37 @@ app.layout = dbc.Container(
     ], fluid=True, style={'height': '100vh'}
 )
 
+# ===== Callbacks ===== #
+@app.callback(
+    Output('graph1', 'figure'),
+    Output('graph2', 'figure'),
+    Output('month-select', 'children'),
+    Input('radio-month', 'value'),
+    Input(ThemeSwitchAIO.ids.switch('theme'), 'value')
+)
+
+def graph_1(month, toggle):
+    template = template_theme_light if toggle else template_theme_dark
+
+    mask = month_filter(month)
+    df_1 = df.loc[mask]
+
+    df_1 = df_1.groupby(['Equipe', 'Consultor'])[PAID_VALUE].sum()
+    df_1 = df_1.sort_values(ascending=False)
+    df_1 = df_1.groupby('Equipe').head(1).reset_index()
+
+    fig_1 = go.Figure(go.Bar(x=df_1['Consultor'], y=df_1[PAID_VALUE], textposition='auto', text=df_1[PAID_VALUE]))
+    fig_2 = go.Figure(go.Pie(labels=df_1['Consultor'] + ' - ' + df_1['Equipe'], values=df_1[PAID_VALUE], hole=.6))
+
+    fig_1.update_layout(main_config, height=180, template=template)
+    fig_2.update_layout(main_config, height=180, template=template, showlegend=False)
+
+    select = html.H1(convert_to_text(month))
+
+    return fig_1, fig_2, select
+
+
 
 # ===== start ===== #
-if __name__ == 'main':
+if __name__ == '__main__':
     app.run_server(debug=True, port=8050)
